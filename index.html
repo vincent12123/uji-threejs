@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="id">
+	<head>
+		<title>Uji three.js</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<style>
+			:root { --bg: #f6f3ec; --fg: #2b2b2b; --muted: #6b6b6b; --card: #ffffff; --line: #e2dccf; --link: #1f5fbf; }
+			@media (prefers-color-scheme: dark) { :root { --bg: #161616; --fg: #ececec; --muted: #9a9a9a; --card: #222; --line: #333; --link: #7fb0ff; } }
+			body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, sans-serif; }
+			main { max-width: 720px; margin: 0 auto; padding: 32px 16px; }
+			h1 { font-size: 1.6rem; margin: 0 0 4px; }
+			p.sub { color: var(--muted); margin: 0 0 24px; }
+			a.kartu { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; color: inherit; text-decoration: none; }
+			a.kartu:hover { border-color: var(--link); }
+			a.kartu b { color: var(--link); }
+			a.kartu span { display: block; color: var(--muted); font-size: .9rem; }
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>Uji three.js</h1>
+			<p class="sub">Halaman uji pemuat model (FBX, glTF, LDraw) dan pathtracer.</p>
+			<a class="kartu" href="uji_fbx_angry.html"><b>FBX Angry</b><span>FBXLoader + animasi Mixamo</span></a>
+			<a class="kartu" href="uji_kepala_facecap.html"><b>Kepala Face Cap di minifig</b><span>GLTFLoader (KTX2 + Meshopt) + LDrawLoader</span></a>
+			<a class="kartu" href="webgl_renderer_pathtracer_luke.html"><b>Pathtracer Luke Skywalker</b><span>three-gpu-pathtracer + LDraw</span></a>
+			<a class="kartu" href="uji_ubah_fbx.html?berkas=models/fbx/uji-anim/jalan.fbx&amp;mode=animasi&amp;nama=jalan.glb"><b>Ubah FBX → GLB</b><span>FBXLoader → GLTFExporter (contoh: animasi jalan; menyimpan hasil hanya lewat penerima lokal 127.0.0.1:8090)</span></a>
+		</main>
+	</body>
+</html>

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="id">
+	<head>
+		<title>Ubah FBX Mixamo ke GLB</title>
+		<meta charset="utf-8">
+		<link type="text/css" rel="stylesheet" href="main.css">
+		<style>
+			body { background: #efe6d2; color: #333; }
+			#log { position: absolute; left: 12px; top: 60px; font: 13px/1.5 ui-monospace, Consolas, monospace; white-space: pre; }
+		</style>
+	</head>
+	<body>
+		<div id="info">Pengubah FBX Mixamo → GLB (model tanpa animasi, atau animasi tanpa model)</div>
+		<div id="log"></div>
+
+		<script type="importmap">
+			{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+		</script>
+
+		<script type="module">
+
+			// Pakai: uji_ubah_fbx.html?berkas=<path FBX>&mode=model|animasi&nama=<keluaran.glb>
+			// Hasil dikirim ke penerima lokal 127.0.0.1:8090 (skrip di scratchpad).
+			import * as THREE from 'three';
+			import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+			import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+			import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
+			import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+			const logEl = document.getElementById( 'log' );
+			const log = ( t ) => { logEl.textContent += t + '\n'; };
+			const q = new URLSearchParams( location.search );
+			const berkas = q.get( 'berkas' ), mode = q.get( 'mode' ) || 'model', nama = q.get( 'nama' );
+
+			// "mixamorig:Hips" / "mixamorigHips" → "Hips", supaya model & animasi dari unduhan berbeda tetap cocok
+			const rapikan = ( n ) => n.replace( /^mixamorig\d*[:_]?/, '' );
+
+			try {
+
+				// Mode "gltf": karakter glTF (mis. Quaternius) → GLB dengan animasi terpilih saja (?klip=Idle,Walk,...)
+				if ( mode === 'gltf' ) {
+
+					const gltf = await new GLTFLoader().loadAsync( berkas );
+					const pilih = ( q.get( 'klip' ) || '' ).split( ',' ).filter( Boolean );
+					const animasi = gltf.animations.filter( ( a ) => ! pilih.length || pilih.includes( a.name ) );
+					log( `klip: ${ animasi.map( ( a ) => a.name ).join( ', ' ) } (dari ${ gltf.animations.length })` );
+					const glb = await new GLTFExporter().parseAsync( gltf.scene, { binary: true, animations: animasi } );
+					log( `${ nama }: ${ ( glb.byteLength / 1048576 ).toFixed( 2 ) } MB` );
+					const r = await fetch( `http://127.0.0.1:8090/simpan?nama=${ encodeURIComponent( nama ) }`, { method: 'POST', body: glb } );
+					log( `penerima: ${ await r.text() }` );
+					window.__selesai = { ok: true, ukuran: glb.byteLength };
+					throw null;   // selesai; lewati jalur FBX di bawah
+
+				}
+
+				const fbx = await new FBXLoader().loadAsync( berkas );
+				fbx.traverse( ( o ) => { o.name = rapikan( o.name ); } );
+				let animasi = [];
+
+				if ( mode === 'model' ) {
+
+					// Phong FBX → Standard (glTF); tekstur JPEG kecuali yang punya transparansi (rambut, bulu mata)
+					fbx.traverse( ( o ) => {
+
+						if ( ! o.isMesh ) return;
+						const ubah = ( m ) => {
+
+							const tembus = m.transparent || m.alphaTest > 0 || m.opacity < 1;
+							const baru = new THREE.MeshStandardMaterial( {
+								name: m.name, color: m.color, map: m.map, normalMap: m.normalMap,
+								roughness: 0.75, metalness: 0,
+								alphaTest: tembus ? 0.5 : 0, side: tembus ? THREE.DoubleSide : THREE.FrontSide,
+							} );
+							for ( const t of [ baru.map, baru.normalMap ] ) if ( t ) t.userData.mimeType = tembus && t === baru.map ? 'image/png' : 'image/jpeg';
+							return baru;
+
+						};
+
+						o.material = Array.isArray( o.material ) ? o.material.map( ubah ) : ubah( o.material );
+
+					} );
+
+					// gambar tekstur dimuat asinkron; tunggu sampai semuanya punya ukuran, buang yang gagal
+					const semuaBahan = [];
+					fbx.traverse( ( o ) => { if ( o.isMesh ) semuaBahan.push( ...[ o.material ].flat() ); } );
+					const ada = ( t ) => t?.image && ( t.image.naturalWidth || t.image.width );
+					for ( let i = 0; i < 100 && semuaBahan.some( ( m ) => ( m.map && ! ada( m.map ) ) || ( m.normalMap && ! ada( m.normalMap ) ) ); i ++ ) await new Promise( ( r ) => setTimeout( r, 200 ) );
+					for ( const m of semuaBahan ) for ( const k of [ 'map', 'normalMap' ] ) if ( m[ k ] && ! ada( m[ k ] ) ) { log( `tekstur ${ k } pada ${ m.name } tidak termuat, dilewati` ); m[ k ] = null; }
+					// tekstur dengan gambar yang sama dipakai bersama (FBX membuat objek tekstur per material)
+					const perGambar = new Map();
+					for ( const m of semuaBahan ) for ( const k of [ 'map', 'normalMap' ] ) {
+
+						const t = m[ k ];
+						if ( ! t ) continue;
+						const kunci = ( t.image.currentSrc || t.image.src || t.uuid ) + k;
+						if ( perGambar.has( kunci ) ) m[ k ] = perGambar.get( kunci ); else perGambar.set( kunci, t );
+
+					}
+
+					// FBXLoader menghasilkan geometri tanpa indeks (titik ditulis ulang per segitiga); gabungkan titik kembar
+					let titikAwal = 0, titikAkhir = 0;
+					fbx.traverse( ( o ) => {
+
+						if ( ! o.isMesh ) return;
+						titikAwal += o.geometry.attributes.position.count;
+						o.geometry = mergeVertices( o.geometry, 1e-4 );
+						titikAkhir += o.geometry.attributes.position.count;
+
+					} );
+					log( `titik: ${ titikAwal } → ${ titikAkhir }, tekstur unik: ${ perGambar.size }` );
+					log( 'bahan: ' + semuaBahan.map( ( m ) => `${ m.name }${ m.map ? ' +map' : '' }${ m.normalMap ? ' +normal' : '' }${ m.alphaTest ? ' (tembus)' : '' }` ).join( ', ' ) );
+
+				} else {
+
+					// hanya tulang + satu klip (yang terpanjang), tanpa mesh
+					const buang = [];
+					fbx.traverse( ( o ) => { if ( o.isMesh ) buang.push( o ); } );
+					buang.forEach( ( o ) => o.removeFromParent() );
+					const klip = [ ...fbx.animations ].sort( ( a, b ) => b.duration - a.duration )[ 0 ];
+					klip.name = nama.replace( /\.glb$/, '' );
+					klip.tracks.forEach( ( t ) => { const [ node, ...sisa ] = t.name.split( '.' ); t.name = [ rapikan( node ), ...sisa ].join( '.' ); } );
+					animasi = [ klip ];
+					log( `klip: ${ klip.name }, ${ klip.duration.toFixed( 2 ) } dtk, ${ klip.tracks.length } track` );
+
+				}
+
+				const glb = await new GLTFExporter().parseAsync( fbx, { binary: true, animations: animasi, maxTextureSize: 1024 } );
+				log( `${ nama }: ${ ( glb.byteLength / 1048576 ).toFixed( 2 ) } MB` );
+				const r = await fetch( `http://127.0.0.1:8090/simpan?nama=${ encodeURIComponent( nama ) }`, { method: 'POST', body: glb } );
+				log( `penerima: ${ await r.text() }` );
+				window.__selesai = { ok: true, ukuran: glb.byteLength };
+
+			} catch ( e ) {
+
+				if ( e !== null ) {
+
+					log( 'GAGAL: ' + e.message );
+					window.__selesai = { ok: false, pesan: e.message };
+
+				}
+
+			}
+
+		</script>
+	</body>
+</html>

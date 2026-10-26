@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="id">
+	<head>
+		<title>Uji kepala facecap pada minifig</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="main.css">
+		<style>
+			body { background: #efe6d2; color: #444; }
+			#info a { color: #c26a12; }
+			#ekspresi { position: absolute; left: 50%; bottom: 18px; translate: -50% 0; display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+			#ekspresi button { font: 600 15px system-ui, sans-serif; padding: 8px 14px; border-radius: 8px; border: 1px solid #b9a98a; background: #fff; cursor: pointer; }
+			#ekspresi button[aria-pressed="true"] { background: #2f5fb3; color: #fff; border-color: #2f5fb3; }
+		</style>
+	</head>
+	<body>
+		<div id="info">
+			Pratinjau: kepala <a href="https://www.bannaflak.com/face-cap" target="_blank" rel="noopener">Face Cap</a> (facecap.glb) di badan minifig Pemeriksa<br/>
+			Minifig: LDraw Parts Library (CCAL 2.0) · seret untuk memutar
+		</div>
+		<div id="ekspresi"></div>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+					"three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+
+			import * as THREE from 'three';
+			import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+			import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+			import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
+			import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+			import { LDrawLoader } from 'three/addons/loaders/LDrawLoader.js';
+			import { LDrawConditionalLineMaterial } from 'three/addons/materials/LDrawConditionalLineMaterial.js';
+			import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+
+			// Ekspresi kantor → bobot blendshape ARKit milik facecap
+			const EKSPRESI = {
+				normal: {},
+				senyum: { mouthSmile_L: 0.85, mouthSmile_R: 0.85, cheekSquint_L: 0.45, cheekSquint_R: 0.45, eyeSquint_L: 0.25, eyeSquint_R: 0.25, mouthDimple_L: 0.3, mouthDimple_R: 0.3 },
+				sedih: { mouthFrown_L: 0.9, mouthFrown_R: 0.9, browInnerUp: 0.9, browDown_L: 0.15, browDown_R: 0.15, eyeLookDown_L: 0.35, eyeLookDown_R: 0.35, mouthShrugLower: 0.4 },
+				kaget: { jawOpen: 0.45, eyeWide_L: 1, eyeWide_R: 1, browInnerUp: 0.8, browOuterUp_L: 0.9, browOuterUp_R: 0.9, mouthFunnel: 0.35 },
+				bicara: { mouthSmile_L: 0.2, mouthSmile_R: 0.2 },   // rahang digerakkan per frame
+			};
+
+			const params = { kedipOtomatis: true, kulit: 'kuning LEGO', ukuranKepala: 1.0, berjalan: false, kameraJauh: false };
+			const KULIT = { 'kuning LEGO': '#f2cd37', 'kulit manusia': '#e8b48f', 'asli (abu-abu)': '#ffffff' };
+
+			let ekspresi = 'normal';
+			let kepala = null, wadahKepala = null, bahanKulit = null;
+			let sendi = null;
+			const target = {}, sekarang = {};
+
+			const renderer = new THREE.WebGLRenderer( { antialias: true } );
+			renderer.setPixelRatio( window.devicePixelRatio );
+			renderer.setSize( window.innerWidth, window.innerHeight );
+			renderer.shadowMap.enabled = true;
+			renderer.setAnimationLoop( animate );
+			document.body.appendChild( renderer.domElement );
+
+			const scene = new THREE.Scene();
+			scene.background = new THREE.Color( '#efe6d2' );
+			scene.add( new THREE.HemisphereLight( '#fff7ea', '#b59a72', 1.7 ) );
+			const matahari = new THREE.DirectionalLight( '#ffffff', 2.0 );
+			matahari.position.set( 60, 140, 120 );
+			matahari.castShadow = true;
+			Object.assign( matahari.shadow.camera, { left: - 60, right: 60, top: 80, bottom: - 20 } );
+			scene.add( matahari );
+			const lantai = new THREE.Mesh( new THREE.CircleGeometry( 90, 48 ), new THREE.MeshLambertMaterial( { color: '#e9d9b8' } ) );
+			lantai.rotation.x = - Math.PI / 2;
+			lantai.receiveShadow = true;
+			scene.add( lantai );
+
+			const camera = new THREE.PerspectiveCamera( 30, window.innerWidth / window.innerHeight, 1, 3000 );
+			const controls = new OrbitControls( camera, renderer.domElement );
+			controls.enableDamping = true;
+			function aturKamera() {
+
+				if ( params.kameraJauh ) {
+
+					// kira-kira sebesar Pemeriksa di kantor (kamera kantor ±900 satuan, karakter ±50)
+					camera.position.set( 0, 670, 600 );
+					controls.target.set( 0, 25, 0 );
+
+				} else {
+
+					camera.position.set( 30, 45, 150 );
+					controls.target.set( 0, 34, 0 );
+
+				}
+
+			}
+
+			aturKamera();
+
+			const tubuh = new THREE.Group();
+			scene.add( tubuh );
+
+			// --- Badan minifig (tanpa kepala LEGO) ---
+			const minifig = await new LDrawLoader()
+				.setConditionalLineMaterial( LDrawConditionalLineMaterial )
+				.loadAsync( 'models/ldraw/minifig-pemeriksa.mpd' );
+			minifig.traverse( ( c ) => {
+
+				if ( c.isLineSegments ) c.visible = false;
+				if ( c.isMesh ) c.castShadow = c.receiveShadow = true;
+
+			} );
+			const part = ( n ) => minifig.children.filter( ( c ) => c.name.endsWith( n ) );
+			part( '3626bp01.dat' )[ 0 ].visible = false;
+			minifig.updateMatrixWorld( true );
+			const [ lKa ] = part( '3818.dat' ), [ lKi ] = part( '3819.dat' ), [ kKa ] = part( '3816.dat' ), [ kKi ] = part( '3817.dat' );
+			for ( const t of part( '3820.dat' ) ) ( t.position.x < 0 ? lKa : lKi ).attach( t );
+			sendi = [ lKa, lKi, kKa, kKi ].map( ( o ) => ( { o, dasar: o.quaternion.clone() } ) );
+			minifig.rotation.x = Math.PI;
+			tubuh.add( minifig );
+			tubuh.scale.setScalar( 0.5 );
+			tubuh.updateMatrixWorld( true );
+			tubuh.position.y = - new THREE.Box3().setFromObject( tubuh ).min.y;
+			tubuh.updateMatrixWorld( true );
+			// leher = bagian atas torso (titik asal LDraw y = 0)
+			const leher = new THREE.Vector3( 0, 0, 0 ).applyMatrix4( minifig.matrixWorld );
+
+			// --- Kepala facecap ---
+			const ktx2 = new KTX2Loader().setTranscoderPath( 'https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/libs/basis/' ).detectSupport( renderer );
+			const gltf = await new GLTFLoader().setKTX2Loader( ktx2 ).setMeshoptDecoder( MeshoptDecoder ).loadAsync( 'models/gltf/facecap.glb' );
+			const akarKepala = gltf.scene;
+			kepala = akarKepala.getObjectByName( 'mesh_2' );
+			akarKepala.traverse( ( c ) => { if ( c.isMesh ) c.castShadow = true; } );
+			// mata, gigi, dan kepala berbagi satu material; kepala diberi salinan sendiri supaya hanya kulit yang diwarnai
+			bahanKulit = kepala.material = kepala.material.clone();
+			for ( const nama of Object.keys( kepala.morphTargetDictionary ) ) sekarang[ nama ] = target[ nama ] = 0;
+
+			wadahKepala = new THREE.Group();
+			wadahKepala.add( akarKepala );
+			tubuh.parent.add( wadahKepala );
+
+			function pasKepala() {
+
+				// skala & posisi kepala: tinggi ±16 satuan dunia (sekitar kepala minifig), dagu tepat di leher
+				akarKepala.scale.setScalar( 1 );
+				akarKepala.position.set( 0, 0, 0 );
+				akarKepala.updateMatrixWorld( true );
+				// Box3.setFromObject ikut menghitung morph target (jauh lebih besar), jadi ukur titik dasarnya saja
+				const kotak = new THREE.Box3();
+				const pos = kepala.geometry.attributes.position, v = new THREE.Vector3();
+				for ( let i = 0; i < pos.count; i ++ ) kotak.expandByPoint( v.fromBufferAttribute( pos, i ).applyMatrix4( kepala.matrixWorld ) );
+				const tinggi = kotak.max.y - kotak.min.y;
+				const s = ( 16 * params.ukuranKepala ) / tinggi;
+				akarKepala.scale.setScalar( s );
+				const tengah = kotak.getCenter( new THREE.Vector3() ).multiplyScalar( s );
+				akarKepala.position.set( - tengah.x, - kotak.min.y * s, - tengah.z );
+				wadahKepala.position.copy( leher ).add( new THREE.Vector3( 0, 0.5, 0 ) );
+
+			}
+
+			pasKepala();
+			const aturKulit = () => bahanKulit.color.set( KULIT[ params.kulit ] );
+			aturKulit();
+
+			// --- Tombol ekspresi & pengaturan ---
+			const panel = document.getElementById( 'ekspresi' );
+			for ( const nama of Object.keys( EKSPRESI ) ) {
+
+				const b = document.createElement( 'button' );
+				b.textContent = nama;
+				b.onclick = () => {
+
+					ekspresi = nama;
+					panel.querySelectorAll( 'button' ).forEach( ( x ) => x.setAttribute( 'aria-pressed', String( x === b ) ) );
+
+				};
+
+				b.setAttribute( 'aria-pressed', String( nama === 'normal' ) );
+				panel.append( b );
+
+			}
+
+			const kedip = document.createElement( 'button' );
+			kedip.textContent = 'kedip';
+			kedip.onclick = () => { waktuKedip = 0.16; };
+			panel.append( kedip );
+
+			const gui = new GUI();
+			gui.add( params, 'kulit', Object.keys( KULIT ) ).name( 'warna kulit' ).onChange( aturKulit );
+			gui.add( params, 'ukuranKepala', 0.7, 1.6, 0.05 ).name( 'ukuran kepala' ).onChange( pasKepala );
+			gui.add( params, 'kedipOtomatis' ).name( 'kedip otomatis' );
+			gui.add( params, 'berjalan' );
+			gui.add( params, 'kameraJauh' ).name( 'ukuran di kantor' ).onChange( aturKamera );
+
+			// --- Animasi ---
+			const timer = new THREE.Timer();
+			let waktu = 0, waktuKedip = 0, kedipBerikut = 2.5;
+			const sumbuX = new THREE.Vector3( 1, 0, 0 );
+			const q = new THREE.Quaternion();
+
+			function animate( now ) {
+
+				timer.update( now );
+				const dt = Math.min( timer.getDelta(), 0.1 );
+				waktu += dt;
+
+				// target blendshape dari ekspresi
+				for ( const nama in target ) target[ nama ] = EKSPRESI[ ekspresi ][ nama ] ?? 0;
+				if ( ekspresi === 'bicara' ) {
+
+					const buka = Math.max( 0, Math.sin( waktu * 13 ) * Math.sin( waktu * 4.1 + 1 ) );
+					target.jawOpen = buka * 0.45;
+					target.mouthFunnel = buka * 0.25;
+
+				}
+
+				// kedip: otomatis tiap 2,5–5 detik, atau lewat tombol
+				if ( params.kedipOtomatis && ( kedipBerikut -= dt ) <= 0 ) { waktuKedip = 0.16; kedipBerikut = 2.5 + Math.random() * 2.5; }
+				if ( waktuKedip > 0 ) { waktuKedip -= dt; target.eyeBlink_L = target.eyeBlink_R = 1; }
+
+				for ( const nama in target ) {
+
+					const laju = nama.startsWith( 'eyeBlink' ) ? 40 : nama === 'jawOpen' && ekspresi === 'bicara' ? 30 : 8;
+					sekarang[ nama ] += ( target[ nama ] - sekarang[ nama ] ) * Math.min( 1, dt * laju );
+					kepala.morphTargetInfluences[ kepala.morphTargetDictionary[ nama ] ] = sekarang[ nama ];
+
+				}
+
+				// gerak badan: sama dengan poseMinifig di kantor3d.js
+				const ayun = params.berjalan ? Math.sin( waktu * 9 ) : 0;
+				let la = - ayun * 0.5, li = ayun * 0.5;
+				if ( ekspresi === 'bicara' && ! params.berjalan ) la = - 0.5;
+				if ( ekspresi === 'kaget' ) la = li = - 1.3;
+				const sudut = [ la, li, ayun * 0.6, - ayun * 0.6 ];
+				sendi.forEach( ( s, i ) => s.o.quaternion.copy( s.dasar ).multiply( q.setFromAxisAngle( sumbuX, sudut[ i ] ) ) );
+
+				// kepala sedikit mengangguk saat bicara, menunduk saat sedih
+				wadahKepala.rotation.x = ekspresi === 'sedih' ? 0.25 : ekspresi === 'bicara' ? Math.sin( waktu * 14 ) * 0.04 : 0;
+
+				controls.update();
+				renderer.render( scene, camera );
+
+			}
+
+			window.addEventListener( 'resize', () => {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			} );
+
+		</script>
+	</body>
+</html>

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="id">
+	<head>
+		<title>Uji FBX Angry</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="main.css">
+		<style>
+			body { background: #efe6d2; color: #444; }
+			#laporan { position: absolute; left: 10px; bottom: 10px; font: 13px/1.5 ui-monospace, Consolas, monospace; background: rgba(255,255,255,.85); padding: 8px 12px; border-radius: 8px; white-space: pre; }
+		</style>
+	</head>
+	<body>
+		<div id="info">Uji FBXLoader: models/fbx/uji-angry/Angry.fbx · seret untuk memutar</div>
+		<div id="laporan">Memuat…</div>
+
+		<script type="importmap">
+			{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/" } }
+		</script>
+
+		<script type="module">
+
+			import * as THREE from 'three';
+			import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+			import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+			const laporan = document.getElementById( 'laporan' );
+			const peringatan = [];
+			const warnAsli = console.warn;
+			console.warn = ( ...a ) => { peringatan.push( a.join( ' ' ) ); warnAsli( ...a ); };
+
+			const renderer = new THREE.WebGLRenderer( { antialias: true } );
+			renderer.setPixelRatio( window.devicePixelRatio );
+			renderer.setSize( window.innerWidth, window.innerHeight );
+			renderer.shadowMap.enabled = true;
+			document.body.appendChild( renderer.domElement );
+
+			const scene = new THREE.Scene();
+			scene.background = new THREE.Color( '#efe6d2' );
+			scene.add( new THREE.HemisphereLight( '#fff7ea', '#b59a72', 2 ) );
+			const matahari = new THREE.DirectionalLight( '#ffffff', 2.2 );
+			matahari.position.set( 100, 250, 150 );
+			matahari.castShadow = true;
+			Object.assign( matahari.shadow.camera, { left: - 150, right: 150, top: 220, bottom: - 50 } );
+			scene.add( matahari );
+			const lantai = new THREE.Mesh( new THREE.CircleGeometry( 200, 48 ), new THREE.MeshLambertMaterial( { color: '#e9d9b8' } ) );
+			lantai.rotation.x = - Math.PI / 2;
+			lantai.receiveShadow = true;
+			scene.add( lantai );
+
+			const camera = new THREE.PerspectiveCamera( 35, window.innerWidth / window.innerHeight, 1, 5000 );
+			const controls = new OrbitControls( camera, renderer.domElement );
+			controls.enableDamping = true;
+
+			let mixer = null;
+			const timer = new THREE.Timer();
+			const mulai = performance.now();
+
+			const fbx = await new FBXLoader().loadAsync( 'models/fbx/uji-angry/Angry.fbx' );
+			const lama = ( ( performance.now() - mulai ) / 1000 ).toFixed( 1 );
+
+			let mesh = 0, segitiga = 0, tulang = 0;
+			const tekstur = new Set(), namaMesh = [];
+			fbx.traverse( ( c ) => {
+
+				if ( c.isBone ) tulang ++;
+				if ( c.isMesh ) {
+
+					mesh ++;
+					namaMesh.push( c.name );
+					c.castShadow = c.receiveShadow = true;
+					const g = c.geometry;
+					segitiga += ( g.index ? g.index.count : g.attributes.position.count ) / 3;
+					for ( const m of [ c.material ].flat() ) for ( const k of [ 'map', 'normalMap', 'specularMap', 'roughnessMap' ] ) if ( m[ k ] ) tekstur.add( m[ k ].uuid );
+
+				}
+
+			} );
+			scene.add( fbx );
+
+			const kotak = new THREE.Box3().setFromObject( fbx );
+			const ukuran = kotak.getSize( new THREE.Vector3() );
+			controls.target.copy( kotak.getCenter( new THREE.Vector3() ) );
+			camera.position.copy( controls.target ).add( new THREE.Vector3( 0, ukuran.y * 0.1, ukuran.y * 2.4 ) );
+
+			if ( fbx.animations.length ) {
+
+				mixer = new THREE.AnimationMixer( fbx );
+				mixer.clipAction( fbx.animations[ 0 ] ).play();
+
+			}
+
+			laporan.textContent = [
+				`waktu muat   : ${ lama } dtk (49 MB)`,
+				`mesh         : ${ mesh } (${ namaMesh.join( ', ' ) })`,
+				`segitiga     : ${ Math.round( segitiga ).toLocaleString( 'id-ID' ) }`,
+				`tulang       : ${ tulang }`,
+				`tekstur      : ${ tekstur.size }`,
+				`animasi      : ${ fbx.animations.map( ( a ) => `${ a.name } (${ a.duration.toFixed( 1 ) } dtk)` ).join( ', ' ) || '-' }`,
+				`tinggi       : ${ ukuran.y.toFixed( 0 ) } satuan`,
+				`peringatan   : ${ peringatan.length ? '\n  - ' + [ ...new Set( peringatan ) ].join( '\n  - ' ) : '-' }`,
+			].join( '\n' );
+			window.__laporan = laporan.textContent;
+
+			renderer.setAnimationLoop( () => {
+
+				timer.update();
+				if ( mixer ) mixer.update( timer.getDelta() );
+				controls.update();
+				renderer.render( scene, camera );
+
+			} );
+
+			window.addEventListener( 'resize', () => {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			} );
+
+		</script>
+	</body>
+</html>
