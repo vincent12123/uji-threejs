@@ -10,6 +10,12 @@ Situs statis — cukup disajikan dengan server web apa pun, mis. `python -m http
 | `webgl_renderer_pathtracer_luke.html` | Pathtracer minifig Luke Skywalker |
 | `uji_ubah_fbx.html` | Konversi FBX → GLB (hasil dikirim ke penerima lokal `127.0.0.1:8090`) |
 
+## Deploy
+
+Situs: https://threejs.sukardi.cloud (shared hosting Hostinger). Commit dulu, lalu jalankan `bash deploy.sh`.
+Skrip itu juga membuat salinan `.gz` untuk model; `.htaccess` menyajikannya ke browser yang menerima gzip
+(server tidak mengompres berkas besar sendiri). Angry.fbx tetap ±50 MB karena teksturnya sudah terkompres.
+
 ## Sumber aset
 
 - `models/fbx/` — karakter & animasi dari Mixamo (Adobe).
