@@ -61,7 +61,6 @@
 			renderer.setPixelRatio( window.devicePixelRatio );
 			renderer.setSize( window.innerWidth, window.innerHeight );
 			renderer.shadowMap.enabled = true;
-			renderer.setAnimationLoop( animate );
 			document.body.appendChild( renderer.domElement );
 
 			const scene = new THREE.Scene();
@@ -199,6 +198,7 @@
 			let waktu = 0, waktuKedip = 0, kedipBerikut = 2.5;
 			const sumbuX = new THREE.Vector3( 1, 0, 0 );
 			const q = new THREE.Quaternion();
+			renderer.setAnimationLoop( animate );   // baru mulai setelah model & timer siap
 
 			function animate( now ) {
 
